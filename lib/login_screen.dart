@@ -1,0 +1,167 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'residence_profile_screen.dart';
+import 'resetpasswordscreen.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _loading = false;
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _loading = true);
+
+    try {
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passwordCtrl.text.trim(),
+      );
+      final uid = cred.user!.uid;
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResidenceProfileScreen(uid: uid),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Login failed')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxW =
+        MediaQuery.of(context).size.width > 480 ? 480.0 : double.infinity;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 1,
+        iconTheme: const IconThemeData(color: Color(0xFF34495e)),
+        title: Text(
+          "Login",
+          style: GoogleFonts.poppins(
+            color: const Color(0xFF34495e),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxW),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFaacfd0).withOpacity(0.4),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  )
+                ],
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _emailCtrl,
+                      decoration: const InputDecoration(labelText: 'Email'),
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _passwordCtrl,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: 'Password'),
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 8),
+
+                    // 👉 Forgot password navigates to reset screen
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ResetPasswordScreen(),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          "Forgot password?",
+                          style: GoogleFonts.poppins(
+                            color: const Color(0xFF34495e),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Login button
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF89bcbe),
+                          foregroundColor: Colors.white,
+                          textStyle: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 16, horizontal: 20),
+                        ),
+                        onPressed: _loading ? null : _login,
+                        child: _loading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Login'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "info": {
+    "name": "LiveKit Cloud API",
+    "_postman_id": "livekit-collection",
+    "description": "Collection to test LiveKit REST API with generated JWT token",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "List Rooms",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{LIVEKIT_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{LIVEKIT_URL}}/rooms",
+          "host": ["{{LIVEKIT_URL}}"],
+          "path": ["rooms"]
+        }
+      }
+    },
+    {
+      "name": "Create Room",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{LIVEKIT_TOKEN}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"test-room\",\n  \"emptyTimeout\": 300\n}"
+        },
+        "url": {
+          "raw": "{{LIVEKIT_URL}}/rooms",
+          "host": ["{{LIVEKIT_URL}}"],
+          "path": ["rooms"]
+        }
+      }
+    },
+    {
+      "name": "Get Room Info",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{LIVEKIT_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{LIVEKIT_URL}}/rooms/test-room",
+          "host": ["{{LIVEKIT_URL}}"],
+          "path": ["rooms", "test-room"]
+        }
+      }
+    },
+    {
+      "name": "List Participants",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{LIVEKIT_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{LIVEKIT_URL}}/rooms/test-room/participants",
+          "host": ["{{LIVEKIT_URL}}"],
+          "path": ["rooms", "test-room", "participants"]
+        }
+      }
+    }
+  ]
+}

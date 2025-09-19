@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LiveKit Web Client</title>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+  <script src="https://unpkg.com/livekit-client/dist/livekit-client.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; text-align: center; }
+    button { margin: 20px; padding: 10px 20px; font-size: 16px; }
+    video { width: 45%; margin: 5px; border-radius: 8px; background: #000; }
+  </style>
+</head>
+<body>
+  <h2>LiveKit Web Test Client</h2>
+  <button id="joinBtn">Join Room</button>
+  <div>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+
+  <script>
+    // ✅ Firebase config (from your Dart logs)
+    const firebaseConfig = {
+      apiKey: "AIzaSyCWu3rm-lsDeQE4NEoYlF4PdyUeAlVjDew",
+      appId: "1:765026817343:web:bc4e3264a2e1ce4e7bef8a",
+      projectId: "curadomusapp",
+      storageBucket: "curadomusapp.firebasestorage.app",
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    const FUNCTION_URL = "https://us-central1-curadomusapp.cloudfunctions.net/createLiveKitToken";
+    const ROOM_NAME = "curadomus_test"; // ⚠️ set same as in Flutter
+
+    async function fetchToken(idToken, identity) {
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + idToken,
+        },
+        body: JSON.stringify({
+          room: ROOM_NAME,
+          identity: identity,
+          name: "Web Client",
+        }),
+      });
+      return res.json();
+    }
+
+    async function joinRoom() {
+      try {
+        // ✅ Sign in anonymously (or adapt to email/password if needed)
+        const userCred = await auth.signInAnonymously();
+        const user = userCred.user;
+        const idToken = await user.getIdToken();
+        const identity = user.uid;
+
+        const { token, url } = await fetchToken(idToken, identity);
+        console.log("✅ Got token", token.substring(0, 30) + "...");
+
+        const room = new LivekitClient.Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // Handle remote video
+        room.on('trackSubscribed', (track, publication, participant) => {
+          if (track.kind === 'video') {
+            const videoEl = document.getElementById('remoteVideo');
+            track.attach(videoEl);
+          }
+        });
+
+        await room.connect(url, token);
+
+        // Publish local video
+        const localVideo = document.getElementById('localVideo');
+        const localTracks = await LivekitClient.createLocalTracks({ video: true, audio: true });
+        for (const track of localTracks) {
+          await room.localParticipant.publishTrack(track);
+          if (track.kind === 'video') {
+            track.attach(localVideo);
+          }
+        }
+
+        console.log("🎥 Connected to LiveKit room:", ROOM_NAME);
+      } catch (err) {
+        console.error("❌ Error joining room:", err);
+      }
+    }
+
+    document.getElementById("joinBtn").addEventListener("click", joinRoom);
+  </script>
+</body>
+</html>
+

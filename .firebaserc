@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "runtime": "nodejs22",
+    "env": ".env"
+  }
+}

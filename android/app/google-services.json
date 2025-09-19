@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "765026817343",
+    "project_id": "curadomusapp",
+    "storage_bucket": "curadomusapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:765026817343:android:80130b3ab7fd16d87bef8a",
+        "android_client_info": {
+          "package_name": "com.curadomus.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCh2wsPl5pHg3QGJn9l0WrmltPLmdWlufg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:765026817343:android:099912fc7374985e7bef8a",
+        "android_client_info": {
+          "package_name": "com.example.curadomus_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCh2wsPl5pHg3QGJn9l0WrmltPLmdWlufg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

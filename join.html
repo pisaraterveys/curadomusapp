@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Join LiveKit Room</title>
+    <script type="module">
+      import { connect } from "https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.min.js";
+
+      async function joinRoom() {
+        const url = "wss://curadomus-mup4xuym.livekit.cloud";
+
+        // 🔑 Your generated token (valid ~1h)
+        const token =
+          "eyJhbGciOiJIUzI1NiJ9.eyJuYW1lIjoiVGVzdCBVc2VyIiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWV9LCJpc3MiOiJBUElNWkx3bkhoQUtWcjYiLCJleHAiOjE3NTcyMTA4NDIsIm5iZiI6MCwic3ViIjoidGVzdF91c2VyIn0.Vyu7rLiylsAJL28YYQpjD9TlIfa3rnQeA9O9AqbrweI";
+
+        try {
+          const room = await connect(url, token);
+          console.log("✅ Connected to room:", room.name);
+
+          // When a remote participant connects
+          room.on("participantConnected", (p) => {
+            console.log("👤 Participant joined:", p.identity);
+          });
+
+          // When a remote track is subscribed
+          room.on("trackSubscribed", (track, pub, participant) => {
+            console.log(`📹 Subscribed to ${track.kind} from ${participant.identity}`);
+            if (track.kind === "video") {
+              const videoEl = document.createElement("video");
+              videoEl.autoplay = true;
+              videoEl.playsInline = true;
+              videoEl.style.width = "100%";
+              document.body.appendChild(videoEl);
+              track.attach(videoEl);
+            }
+          });
+
+          // Participant leaves
+          room.on("participantDisconnected", (p) => {
+            console.log("❌ Participant left:", p.identity);
+          });
+        } catch (e) {
+          console.error("❌ Failed to connect:", e);
+        }
+      }
+
+      window.onload = joinRoom;
+    </script>
+  </head>
+  <body>
+    <h1>LiveKit Test Join</h1>
+    <p>Open console (F12). Remote video will appear below once published from Flutter.</p>
+  </body>
+</html>
+

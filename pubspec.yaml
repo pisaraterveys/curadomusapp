@@ -1,0 +1,39 @@
+name: curadomus_app
+description: "A new Flutter project."
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Firebase
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.0
+  cloud_firestore: ^5.4.4
+  intl: ^0.19.0  
+
+  # UI
+  google_fonts: ^6.2.1
+  url_launcher: ^6.3.0
+
+  livekit_client: ^2.2.1
+  cloud_functions: ^5.0.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo/curadomus.png
+    - assets/data/icd10_codes.json
