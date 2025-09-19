@@ -117,24 +117,46 @@ class ResidentProfileScreen extends StatelessWidget {
 
   Future<void> _startCall(BuildContext context) async {
     try {
-      String? uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null || uid.isEmpty) {
+      final buyerUid = FirebaseAuth.instance.currentUser?.uid;
+      if (buyerUid == null || buyerUid.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Error: No caller UID found")),
         );
         return;
       }
 
-      final buyerSnap =
-          await FirebaseFirestore.instance.collection("users").doc(uid).get();
+      // Fetch buyer data
+      final buyerSnap = await FirebaseFirestore.instance
+          .collection("users")
+          .doc(buyerUid)
+          .get();
       final buyerData = buyerSnap.data() ?? {};
+
+      // Reference resident doc under buyer
+      final residentDoc = FirebaseFirestore.instance
+          .collection("users")
+          .doc(buyerUid)
+          .collection("family")
+          .doc(data["id"]);
+
+      final residentSnap = await residentDoc.get();
+      final residentData = residentSnap.data() ?? {};
+
+      // Ensure patientId exists for this resident
+      String patientId = (residentData["patientId"] ?? "").toString();
+      if (patientId.isEmpty) {
+        // create stable ID
+        patientId = FirebaseFirestore.instance.collection("patients").doc().id;
+        await residentDoc.update({"patientId": patientId});
+      }
 
       final roomId = "curadomus_${DateTime.now().millisecondsSinceEpoch}";
 
       final mergedData = {
         "room": roomId,
-        "startedByUid": uid,                 // main account UID
-        "residentId": data["id"],            // ✅ family member id for visits
+        "startedByUid": buyerUid, // who placed the call
+        "patientId": patientId,   // stable ID for resident
+        "residentId": data["id"],
         "residentName": data["name"] ?? "",
         "firstName": buyerData["firstName"] ?? "",
         "lastName": buyerData["lastName"] ?? "",
@@ -152,21 +174,26 @@ class ResidentProfileScreen extends StatelessWidget {
         "createdAt": FieldValue.serverTimestamp(),
       };
 
-      // Save call doc
+      // Save call (professional joins from CallQueue)
       await FirebaseFirestore.instance.collection("calls").add(mergedData);
 
-      // ✅ Do NOT pass patientData here — VideoCallScreen doesn't accept it.
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VideoCallScreen(
-            room: roomId,
-            userName:
-                "${buyerData["firstName"] ?? ""} ${buyerData["lastName"] ?? ""}",
-            patientUid: data["id"], // residentId
+      // Navigate to the patient video screen
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VideoCallScreen(
+              room: roomId,
+              userName:
+                  "${buyerData["firstName"] ?? ""} ${buyerData["lastName"] ?? ""}",
+              // NOTE: Your current VideoCallScreen doesn't accept patientUid / callDocId.
+              // If you later add them back, you can pass:
+              // patientUid: patientId,
+              // callDocId: callRef.id,
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Failed to start call: $e")),
@@ -174,7 +201,7 @@ class ResidentProfileScreen extends StatelessWidget {
     }
   }
 
-  Widget _visitHistory(String residentId) {
+  Widget _visitHistory(String patientId) {
     return Container(
       height: 250,
       decoration: BoxDecoration(
@@ -192,7 +219,7 @@ class ResidentProfileScreen extends StatelessWidget {
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection("visits")
-            .where("patientId", isEqualTo: residentId) // ✅ fetch by residentId
+            .where("patientId", isEqualTo: patientId)
             .orderBy("createdAt", descending: true)
             .snapshots(),
         builder: (context, snap) {
@@ -263,7 +290,6 @@ class ResidentProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final diagnoses = _asStringList(data["diagnoses"]);
     final medications = _asStringList(data["medications"]);
-    final residentId = data["id"]?.toString() ?? "";
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -412,7 +438,34 @@ class ResidentProfileScreen extends StatelessWidget {
                   color: const Color(0xFF34495e))),
           const SizedBox(height: 12),
 
-          _visitHistory(residentId),
+          // Fetch patientId dynamically from family doc and render the history
+          FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection("users")
+                .doc(FirebaseAuth.instance.currentUser!.uid)
+                .collection("family")
+                .doc(data["id"])
+                .get(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  height: 80,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (!snap.hasData || !snap.data!.exists) {
+                return Text("No patient profile",
+                    style: GoogleFonts.poppins(color: Colors.black54));
+              }
+              final resident = snap.data!.data() as Map<String, dynamic>?;
+              final patientId = (resident?["patientId"] ?? "").toString();
+              if (patientId.isEmpty) {
+                return Text("No patient ID yet",
+                    style: GoogleFonts.poppins(color: Colors.black54));
+              }
+              return _visitHistory(patientId);
+            },
+          ),
         ],
       ),
     );

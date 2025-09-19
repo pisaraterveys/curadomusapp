@@ -9,14 +9,14 @@ import 'package:livekit_client/livekit_client.dart' as lk;
 class VideoCallScreen extends StatefulWidget {
   final String room; // e.g. "curadomus_<uid>"
   final String userName; // display name
-  final String? patientUid; // defaults to FirebaseAuth.currentUser?.uid
-  final String? callDocId; // ✅ link to Firestore call doc created in profile screen
+  final String? patientId; // ✅ stable patient ID (not just Firebase uid)
+  final String? callDocId; // Firestore call doc
 
   const VideoCallScreen({
     super.key,
     required this.room,
     required this.userName,
-    this.patientUid,
+    this.patientId,
     this.callDocId,
   });
 
@@ -32,8 +32,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _joining = true;
   bool _ended = false;
   String? _callDocId;
-
   lk.VideoTrack? _remoteVideoTrack;
+
+  // Chart form controllers
+  final _reasonCtrl = TextEditingController();
+  final _backgroundCtrl = TextEditingController();
+  final _statusCtrl = TextEditingController();
+  final _planCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -81,7 +86,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Future<void> _startCallFlow() async {
     try {
-      // ✅ Use provided call doc id (already created in profile screen)
       _callDocId = widget.callDocId;
 
       final data = await _fetchLiveKitToken();
@@ -95,20 +99,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         ),
       );
 
-      // listen for events
       room.events.listen((event) {
-        debugPrint("📡 [PATIENT] Event: $event");
+        debugPrint("📡 [VIDEO EVENT] $event");
         if (event is lk.TrackSubscribedEvent &&
             event.track is lk.VideoTrack) {
-          setState(() {
-            _remoteVideoTrack = event.track as lk.VideoTrack;
-          });
+          setState(() => _remoteVideoTrack = event.track as lk.VideoTrack);
         }
         if (event is lk.TrackUnsubscribedEvent &&
             event.track is lk.VideoTrack) {
-          setState(() {
-            _remoteVideoTrack = null;
-          });
+          setState(() => _remoteVideoTrack = null);
         }
       });
 
@@ -122,19 +121,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       });
     } catch (e) {
       setState(() => _joining = false);
-      debugPrint("❌ Patient error: $e");
+      debugPrint("❌ Video error: $e");
     }
   }
 
   Future<void> _endCall() async {
     if (_ended) return;
     _ended = true;
+
     try {
       await _room?.disconnect();
       _room?.dispose();
     } catch (_) {}
 
-    // ✅ Update existing call doc instead of creating a new one
     if (_callDocId != null) {
       await _db.collection('calls').doc(_callDocId!).update({
         'status': 'ended',
@@ -143,6 +142,31 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
 
     if (mounted) Navigator.of(context).maybePop();
+  }
+
+  Future<void> _saveVisit() async {
+    final provider = _auth.currentUser;
+    if (provider == null || widget.patientId == null) return;
+
+    await _db.collection("visits").add({
+      "patientId": widget.patientId, // ✅ stable patient id
+      "providerId": provider.uid,
+      "providerName": widget.userName,
+      "reason": _reasonCtrl.text.trim(),
+      "background": _backgroundCtrl.text.trim(),
+      "status": _statusCtrl.text.trim(),
+      "plan": _planCtrl.text.trim(),
+      "createdAt": FieldValue.serverTimestamp(),
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("✅ Visit saved")),
+    );
+
+    _reasonCtrl.clear();
+    _backgroundCtrl.clear();
+    _statusCtrl.clear();
+    _planCtrl.clear();
   }
 
   @override
@@ -154,7 +178,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Widget _remoteVideo() {
     if (_remoteVideoTrack == null) {
       return Container(
-        height: 260,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0xFFF4FAFA),
@@ -209,19 +232,74 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         appBar: AppBar(
           title: Text("Video Consultation",
               style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.call_end, color: Colors.red),
+              onPressed: _endCall,
+            ),
+          ],
         ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxW),
-            child: _joining
-                ? const CircularProgressIndicator()
-                : Stack(
-                    children: [
-                      _remoteVideo(),
-                      _localVideo(),
-                    ],
+        body: Row(
+          children: [
+            // Video area
+            Expanded(
+              flex: 3,
+              child: Center(
+                child: _joining
+                    ? const CircularProgressIndicator()
+                    : Stack(
+                        children: [
+                          Positioned.fill(child: _remoteVideo()),
+                          _localVideo(),
+                        ],
+                      ),
+              ),
+            ),
+
+            // Chart sidebar
+            Container(
+              width: 320,
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                border: Border(left: BorderSide(color: Colors.black12)),
+                color: Colors.white,
+              ),
+              child: ListView(
+                children: [
+                  Text("🧑‍⚕️ Visit Chart",
+                      style: GoogleFonts.poppins(
+                          fontSize: 18, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _reasonCtrl,
+                    decoration: const InputDecoration(labelText: "Reason"),
                   ),
-          ),
+                  TextField(
+                    controller: _backgroundCtrl,
+                    decoration: const InputDecoration(labelText: "Background"),
+                  ),
+                  TextField(
+                    controller: _statusCtrl,
+                    decoration: const InputDecoration(labelText: "Status"),
+                  ),
+                  TextField(
+                    controller: _planCtrl,
+                    decoration: const InputDecoration(labelText: "Plan"),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF89bcbe),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _saveVisit,
+                    icon: const Icon(Icons.save),
+                    label: const Text("Save Visit"),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

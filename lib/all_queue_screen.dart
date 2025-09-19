@@ -3,8 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
-// ⬇️ IMPORTANT: ensure the path matches your project.
-// If your file is in /lib/screens/, change this to: 'screens/professional_video_call_screen.dart'
+// Ensure this path is correct in your project.
 import 'professional_video_call_screen.dart' as pro;
 
 class CallQueueScreen extends StatefulWidget {
@@ -115,7 +114,10 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
         ),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _db.collection("calls").orderBy("createdAt", descending: true).snapshots(),
+        stream: _db
+            .collection("calls")
+            .orderBy("createdAt", descending: true)
+            .snapshots(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -124,7 +126,8 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
             return Center(
               child: Text(
                 "No calls",
-                style: GoogleFonts.poppins(fontSize: 16, color: Colors.black54),
+                style:
+                    GoogleFonts.poppins(fontSize: 16, color: Colors.black54),
               ),
             );
           }
@@ -138,6 +141,8 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
               final call = docs[index].data() as Map<String, dynamic>;
               final room = (call["room"] ?? "Unknown Room").toString();
               final startedByUid = (call['startedByUid'] ?? '').toString();
+              final residentId =
+                  (call['residentId'] ?? startedByUid).toString(); // ✅ always prefer residentId
               final status = (call["status"] ?? "active").toString();
               final createdAt = (call["createdAt"] as Timestamp?)?.toDate();
 
@@ -153,7 +158,8 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                 final medications = patientData['medications'] ?? '—';
 
                 return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -183,7 +189,8 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                               color: const Color(0xFF89bcbe).withOpacity(0.15),
                               borderRadius: BorderRadius.circular(14),
                             ),
-                            child: const Icon(Icons.person, color: Color(0xFF89bcbe)),
+                            child: const Icon(Icons.person,
+                                color: Color(0xFF89bcbe)),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -193,7 +200,9 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                                 Text(
                                   fullName.isNotEmpty
                                       ? fullName
-                                      : (call['startedByName'] ?? 'Unknown'),
+                                      : (call['residentName'] ??
+                                          call['startedByName'] ??
+                                          'Unknown'),
                                   style: GoogleFonts.poppins(
                                     fontWeight: FontWeight.w700,
                                     fontSize: 16,
@@ -224,25 +233,21 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                                 ),
                               ),
                               onPressed: () async {
-                                final patientData = await _loadUserData(startedByUid, call);
-
-                                final fullName = [
-                                  patientData['firstName'] ?? '',
-                                  patientData['lastName'] ?? ''
-                                ].where((s) => s.toString().isNotEmpty).join(' ');
+                                final patientData =
+                                    await _loadUserData(startedByUid, call);
 
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => pro.ProfessionalVideoCallScreen(
+                                    builder: (_) =>
+                                        pro.ProfessionalVideoCallScreen(
                                       room: room,
-                                      patientData: {
-                                        ...patientData,
-                                        'age': age,
-                                        'fullName': fullName.isNotEmpty ? fullName : 'Unknown',
-                                        'startedByUid': startedByUid,
-                                        'startedByName': call['startedByName'] ?? fullName,
-                                      },
+                                      userName:
+                                          "Doctor", // TODO: replace with signed-in provider name
+                                      patientUid:
+                                          residentId, // ✅ always use residentId
+                                      callDocId:
+                                          docs[index].id, // Firestore call doc
                                     ),
                                   ),
                                 );
@@ -256,18 +261,25 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                         const SizedBox(height: 10),
                         Text(
                           "Requested: ${DateFormat('dd.MM.yyyy HH:mm').format(createdAt)}",
-                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.black54),
+                          style: GoogleFonts.poppins(
+                              fontSize: 12, color: Colors.black54),
                         ),
                       ],
 
                       const SizedBox(height: 14),
-                      Text("Diagnosis", style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      Text("Diagnosis",
+                          style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600)),
                       Text(diagnoses,
-                          style: GoogleFonts.poppins(fontSize: 13, color: Colors.black87)),
+                          style: GoogleFonts.poppins(
+                              fontSize: 13, color: Colors.black87)),
                       const SizedBox(height: 10),
-                      Text("Medications", style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      Text("Medications",
+                          style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600)),
                       Text(medications,
-                          style: GoogleFonts.poppins(fontSize: 13, color: Colors.black87)),
+                          style: GoogleFonts.poppins(
+                              fontSize: 13, color: Colors.black87)),
                     ],
                   ),
                 );

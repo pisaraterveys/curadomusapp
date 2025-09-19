@@ -1,14 +1,23 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'package:livekit_client/livekit_client.dart' as lk;
 
 class ProfessionalVideoCallScreen extends StatefulWidget {
-  final String room;
-  final Map<String, dynamic> patientData;
+  final String room; // e.g. "curadomus_<uid>"
+  final String userName; // display name
+  final String? patientUid; // patient ID
+  final String? callDocId; // Firestore call doc
 
   const ProfessionalVideoCallScreen({
     super.key,
     required this.room,
-    required this.patientData,
+    required this.userName,
+    this.patientUid,
+    this.callDocId,
   });
 
   @override
@@ -18,215 +27,264 @@ class ProfessionalVideoCallScreen extends StatefulWidget {
 
 class _ProfessionalVideoCallScreenState
     extends State<ProfessionalVideoCallScreen> {
+  final _db = FirebaseFirestore.instance;
+  final _auth = FirebaseAuth.instance;
+
+  lk.Room? _room;
+  bool _joining = true;
+  bool _ended = false;
+  String? _callDocId;
+  lk.VideoTrack? _remoteVideoTrack;
+
+  // Chart form controllers
   final _reasonCtrl = TextEditingController();
   final _backgroundCtrl = TextEditingController();
   final _statusCtrl = TextEditingController();
   final _planCtrl = TextEditingController();
 
   @override
-  Widget build(BuildContext context) {
-    const brandNavy = Color(0xFF34495e);
-    const brandTeal = Color(0xFF89bcbe);
+  void initState() {
+    super.initState();
+    _startCallFlow();
+  }
 
-    final patient = widget.patientData;
-    final fullName = patient['fullName'] ?? "Unknown";
-    final age = patient['age'] ?? "";
-    final subscription = patient['subscription'] ?? "—";
-    final city = patient['city'] ?? "";
-    final street = patient['street'] ?? "";
-    final diagnoses = patient['diagnoses'] ?? "—";
-    final medications = patient['medications'] ?? "—";
-    final notes = patient['notes'] ?? "—";
-    final insurance = patient['insurance'] ?? "—";
-    final email = patient['email'] ?? "—";
+  Future<Map<String, dynamic>> _fetchLiveKitToken() async {
+    final url = Uri.parse(
+      "https://us-central1-curadomusapp.cloudfunctions.net/createLiveKitToken",
+    );
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
-        iconTheme: const IconThemeData(color: brandNavy),
-        title: Text(
-          "Professional Video Call",
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            color: brandNavy,
-          ),
+    final user = _auth.currentUser;
+    if (user == null) throw Exception("Not logged in");
+    final idToken = await user.getIdToken();
+
+    final response = await http.post(
+      url,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $idToken",
+      },
+      body: jsonEncode({
+        "room": widget.room,
+        "identity": user.uid,
+        "name": widget.userName,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception("Failed to get token: ${response.body}");
+    }
+  }
+
+  Future<void> _startCallFlow() async {
+    try {
+      _callDocId = widget.callDocId;
+
+      final data = await _fetchLiveKitToken();
+      final token = data['token'] as String;
+      final url = data['url'] as String;
+
+      final room = lk.Room(
+        roomOptions: const lk.RoomOptions(adaptiveStream: true, dynacast: true),
+      );
+
+      room.events.listen((event) {
+        if (event is lk.TrackSubscribedEvent &&
+            event.track is lk.VideoTrack) {
+          setState(() => _remoteVideoTrack = event.track as lk.VideoTrack);
+        }
+        if (event is lk.TrackUnsubscribedEvent &&
+            event.track is lk.VideoTrack) {
+          setState(() => _remoteVideoTrack = null);
+        }
+      });
+
+      await room.connect(url, token);
+      await room.localParticipant?.setCameraEnabled(true);
+      await room.localParticipant?.setMicrophoneEnabled(true);
+
+      setState(() {
+        _room = room;
+        _joining = false;
+      });
+    } catch (e) {
+      setState(() => _joining = false);
+      debugPrint("❌ Video error: $e");
+    }
+  }
+
+  Future<void> _endCall() async {
+    if (_ended) return;
+    _ended = true;
+
+    try {
+      await _room?.disconnect();
+      _room?.dispose();
+    } catch (_) {}
+
+    if (_callDocId != null) {
+      await _db.collection('calls').doc(_callDocId!).update({
+        'status': 'ended',
+        'endedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  Future<void> _saveVisit() async {
+    final provider = _auth.currentUser;
+    if (provider == null || widget.patientUid == null) return;
+
+    await _db.collection("visits").add({
+      "patientId": widget.patientUid,
+      "providerId": provider.uid,
+      "providerName": widget.userName,
+      "reason": _reasonCtrl.text.trim(),
+      "background": _backgroundCtrl.text.trim(),
+      "status": _statusCtrl.text.trim(),
+      "plan": _planCtrl.text.trim(),
+      "createdAt": FieldValue.serverTimestamp(),
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("✅ Visit saved")),
+    );
+
+    _reasonCtrl.clear();
+    _backgroundCtrl.clear();
+    _statusCtrl.clear();
+    _planCtrl.clear();
+  }
+
+  @override
+  void dispose() {
+    _endCall();
+    super.dispose();
+  }
+
+  Widget _remoteVideo() {
+    if (_remoteVideoTrack == null) {
+      return Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4FAFA),
+          borderRadius: BorderRadius.circular(16),
         ),
-      ),
-      body: Row(
-        children: [
-          // Video area
-          Expanded(
-            flex: 3,
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: brandTeal.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: brandTeal),
-              ),
-              child: Center(
-                child: Text(
-                  "📹 Video Call Here\n(Room: ${widget.room})",
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: brandNavy,
-                  ),
-                ),
-              ),
+        child: const Text("Waiting for patient…"),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: lk.VideoTrackRenderer(_remoteVideoTrack!),
+    );
+  }
+
+  Widget _localVideo() {
+    if (_room?.localParticipant == null) return const SizedBox();
+
+    for (var pub in _room!.localParticipant!.videoTrackPublications) {
+      final track = pub.track;
+      if (track != null && track is lk.VideoTrack) {
+        return Positioned(
+          right: 16,
+          bottom: 16,
+          width: 120,
+          height: 160,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: lk.VideoTrackRenderer(
+              track,
+              mirrorMode: lk.VideoViewMirrorMode.mirror,
             ),
           ),
+        );
+      }
+    }
+    return const SizedBox();
+  }
 
-          // Patient info + chart
-          Expanded(
-            flex: 2,
-            child: Container(
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        await _endCall();
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text("Video Consultation",
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.call_end, color: Colors.red),
+              onPressed: _endCall,
+            ),
+          ],
+        ),
+        body: Row(
+          children: [
+            // LEFT: Video call area
+            Expanded(
+              flex: 3,
+              child: Center(
+                child: _joining
+                    ? const CircularProgressIndicator()
+                    : Stack(
+                        children: [
+                          Positioned.fill(child: _remoteVideo()),
+                          _localVideo(),
+                        ],
+                      ),
+              ),
+            ),
+
+            // RIGHT: Patient info + charting
+            Container(
+              width: 320,
               padding: const EdgeInsets.all(16),
-              color: const Color(0xFFF9FAFB),
+              decoration: const BoxDecoration(
+                border: Border(left: BorderSide(color: Colors.black12)),
+                color: Colors.white,
+              ),
               child: ListView(
                 children: [
-                  // Header
-                  Center(
-                    child: Column(
-                      children: [
-                        CircleAvatar(
-                          radius: 40,
-                          backgroundColor: brandTeal,
-                          child: const Icon(Icons.person,
-                              size: 40, color: Colors.white),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          fullName,
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: brandNavy,
-                          ),
-                        ),
-                        if (age.toString().isNotEmpty)
-                          Text("Age: $age",
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, color: Colors.black54)),
-                        if (subscription.toString().isNotEmpty)
-                          Text("Subscription: $subscription",
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, color: Colors.black54)),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Info box
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFaacfd0).withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("City: $city"),
-                        Text("Street: $street"),
-                        Text("Insurance: $insurance"),
-                        Text("Email: $email"),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Diagnoses
-                  Text("Diagnoses",
+                  Text("🧑‍⚕️ Visit Chart",
                       style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, color: brandNavy)),
-                  Text(diagnoses,
-                      style: GoogleFonts.poppins(color: Colors.black87)),
-
+                          fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 12),
-
-                  // Medications
-                  Text("Medications",
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, color: brandNavy)),
-                  Text(medications,
-                      style: GoogleFonts.poppins(color: Colors.black87)),
-
-                  const SizedBox(height: 20),
-
-                  // Notes
-                  Text("Notes",
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, color: brandNavy)),
-                  Text(notes,
-                      style: GoogleFonts.poppins(color: Colors.black87)),
-
-                  const SizedBox(height: 20),
-
-                  // Charting form
-                  Text("Charting",
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, color: brandNavy)),
-                  const SizedBox(height: 10),
-                  _chartField("Reason", _reasonCtrl),
-                  _chartField("Background", _backgroundCtrl),
-                  _chartField("Status", _statusCtrl),
-                  _chartField("Plan", _planCtrl),
-
-                  const SizedBox(height: 20),
-
+                  TextField(
+                    controller: _reasonCtrl,
+                    decoration: const InputDecoration(labelText: "Reason"),
+                  ),
+                  TextField(
+                    controller: _backgroundCtrl,
+                    decoration: const InputDecoration(labelText: "Background"),
+                  ),
+                  TextField(
+                    controller: _statusCtrl,
+                    decoration: const InputDecoration(labelText: "Status"),
+                  ),
+                  TextField(
+                    controller: _planCtrl,
+                    decoration: const InputDecoration(labelText: "Plan"),
+                  ),
+                  const SizedBox(height: 16),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: brandTeal,
+                      backgroundColor: const Color(0xFF89bcbe),
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14, horizontal: 20),
                     ),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text("Save charting (TODO: Firestore)")));
-                    },
+                    onPressed: _saveVisit,
                     icon: const Icon(Icons.save),
-                    label: Text(
-                      "Save",
-                      style:
-                          GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                    ),
+                    label: const Text("Save Visit"),
                   ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chartField(String label, TextEditingController ctrl) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        controller: ctrl,
-        maxLines: null,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          contentPadding:
-              const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          ],
         ),
       ),
     );
