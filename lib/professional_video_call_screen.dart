@@ -32,7 +32,9 @@ class _ProfessionalVideoCallScreenState
   bool _joining = true;
   bool _ended = false;
   String? _callDocId;
-  String? _patientId; // ✅ stable patientId from call doc
+  String? _patientId;   // ✅ stable patientId from call doc
+  String? _buyerUid;    // ✅ who started the call
+  String? _residentId;  // ✅ which family profile
   lk.VideoTrack? _remoteVideoTrack;
 
   // Chart form controllers
@@ -80,12 +82,14 @@ class _ProfessionalVideoCallScreenState
     try {
       _callDocId = widget.callDocId;
 
-      // ✅ Fetch patientId from the call doc
+      // ✅ Fetch patientId, buyerUid, residentId from the call doc
       if (_callDocId != null) {
         final callSnap = await _db.collection("calls").doc(_callDocId).get();
         if (callSnap.exists) {
           final callData = callSnap.data() ?? {};
           _patientId = callData["patientId"]?.toString();
+          _buyerUid = callData["startedByUid"]?.toString();
+          _residentId = callData["residentId"]?.toString();
         }
       }
 
@@ -146,7 +150,9 @@ class _ProfessionalVideoCallScreenState
     if (provider == null || _patientId == null) return;
 
     await _db.collection("visits").add({
-      "patientId": _patientId, // ✅ stable patientId from call doc
+      "patientId": _patientId, // ✅ stable per resident
+      "buyerUid": _buyerUid,   // ✅ which account
+      "residentId": _residentId, // ✅ which family profile
       "providerId": provider.uid,
       "providerName": widget.userName,
       "reason": _reasonCtrl.text.trim(),

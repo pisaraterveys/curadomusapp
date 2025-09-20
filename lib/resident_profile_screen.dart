@@ -126,8 +126,7 @@ class ResidentProfileScreen extends StatelessWidget {
         return;
       }
 
-      final buyerSnap =
-          await _db.collection("users").doc(buyerUid).get();
+      final buyerSnap = await _db.collection("users").doc(buyerUid).get();
       final buyerData = buyerSnap.data() ?? {};
 
       final residentDoc = _db
@@ -139,9 +138,9 @@ class ResidentProfileScreen extends StatelessWidget {
       final residentSnap = await residentDoc.get();
       Map<String, dynamic> residentData = residentSnap.data() ?? {};
 
-      // ✅ Generate or reuse stable patientId for THIS resident only
+      // ✅ Create patientId once and reuse always
       String patientId = (residentData["patientId"] ?? "").toString();
-      if (patientId.isEmpty) {
+      if (!residentSnap.exists) {
         patientId = _db.collection("patients").doc().id;
         await residentDoc.set({
           ...data,
@@ -149,15 +148,18 @@ class ResidentProfileScreen extends StatelessWidget {
           "patientId": patientId,
           "createdAt": FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+      } else if (patientId.isEmpty) {
+        patientId = _db.collection("patients").doc().id;
+        await residentDoc.update({"patientId": patientId});
       }
 
       final roomId = "curadomus_${DateTime.now().millisecondsSinceEpoch}";
 
       final mergedData = {
         "room": roomId,
-        "startedByUid": buyerUid,
-        "patientId": patientId, // ✅ stable resident-specific id
-        "residentId": data["id"],
+        "startedByUid": buyerUid, // who initiated the call
+        "residentId": data["id"], // which family member
+        "patientId": patientId,   // stable per resident
         "residentName": data["name"] ?? "",
         "firstName": buyerData["firstName"] ?? "",
         "lastName": buyerData["lastName"] ?? "",
@@ -175,8 +177,7 @@ class ResidentProfileScreen extends StatelessWidget {
         "createdAt": FieldValue.serverTimestamp(),
       };
 
-      final callRef =
-          await _db.collection("calls").add(mergedData);
+      final callRef = await _db.collection("calls").add(mergedData);
 
       if (context.mounted) {
         Navigator.push(
@@ -200,87 +201,74 @@ class ResidentProfileScreen extends StatelessWidget {
   }
 
   Widget _visitHistory(String patientId) {
-    return Container(
-      height: 250,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFaacfd0).withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(8),
-      child: StreamBuilder<QuerySnapshot>(
-        stream: _db
-            .collection("visits")
-            .where("patientId", isEqualTo: patientId)
-            .orderBy("createdAt", descending: true)
-            .snapshots(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snap.hasData || snap.data!.docs.isEmpty) {
-            return Center(
-              child: Text("No visit history",
-                  style: GoogleFonts.poppins(
-                      fontSize: 14, color: Colors.black54)),
-            );
-          }
-
-          final docs = snap.data!.docs;
-
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final v = docs[index].data() as Map<String, dynamic>;
-              final createdAt = (v["createdAt"] as Timestamp?)?.toDate();
-              final formattedDate = createdAt != null
-                  ? DateFormat("dd.MM.yyyy HH:mm").format(createdAt)
-                  : "-";
-              final providerName = v["providerName"] ?? "Unknown";
-
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: ExpansionTile(
-                  title: Text(
-                    "📅 $formattedDate",
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w600, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    "👨‍⚕️ $providerName",
-                    style: GoogleFonts.poppins(
-                        fontSize: 13, color: Colors.black54),
-                  ),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("Reason: ${v["reason"] ?? "-"}",
-                              style: GoogleFonts.poppins(fontSize: 14)),
-                          Text("Background: ${v["background"] ?? "-"}",
-                              style: GoogleFonts.poppins(fontSize: 14)),
-                          Text("Status: ${v["status"] ?? "-"}",
-                              style: GoogleFonts.poppins(fontSize: 14)),
-                          Text("Plan: ${v["plan"] ?? "-"}",
-                              style: GoogleFonts.poppins(fontSize: 14)),
-                        ],
-                      ),
-                    )
-                  ],
-                ),
-              );
-            },
+    return StreamBuilder<QuerySnapshot>(
+      stream: _db
+          .collection("visits")
+          .where("patientId", isEqualTo: patientId)
+          .orderBy("createdAt", descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return Center(
+            child: Text("No visit history",
+                style: GoogleFonts.poppins(
+                    fontSize: 14, color: Colors.black54)),
           );
-        },
-      ),
+        }
+
+        final docs = snap.data!.docs;
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final v = docs[index].data() as Map<String, dynamic>;
+            final createdAt = (v["createdAt"] as Timestamp?)?.toDate();
+            final formattedDate = createdAt != null
+                ? DateFormat("dd.MM.yyyy HH:mm").format(createdAt)
+                : "-";
+            final providerName = v["providerName"] ?? "Unknown";
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              child: ExpansionTile(
+                title: Text(
+                  "📅 $formattedDate",
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600, fontSize: 14),
+                ),
+                subtitle: Text(
+                  "👨‍⚕️ $providerName",
+                  style: GoogleFonts.poppins(
+                      fontSize: 13, color: Colors.black54),
+                ),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Reason: ${v["reason"] ?? "-"}",
+                            style: GoogleFonts.poppins(fontSize: 14)),
+                        Text("Background: ${v["background"] ?? "-"}",
+                            style: GoogleFonts.poppins(fontSize: 14)),
+                        Text("Status: ${v["status"] ?? "-"}",
+                            style: GoogleFonts.poppins(fontSize: 14)),
+                        Text("Plan: ${v["plan"] ?? "-"}",
+                            style: GoogleFonts.poppins(fontSize: 14)),
+                      ],
+                    ),
+                  )
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -288,6 +276,8 @@ class ResidentProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final diagnoses = _asStringList(data["diagnoses"]);
     final medications = _asStringList(data["medications"]);
+
+    final patientId = (data["patientId"] ?? "").toString();
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -416,8 +406,7 @@ class ResidentProfileScreen extends StatelessWidget {
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
-              padding:
-                  const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
             ),
             onPressed: () => _startCall(context),
             icon: const Icon(Icons.video_call),
@@ -436,33 +425,11 @@ class ResidentProfileScreen extends StatelessWidget {
                   color: const Color(0xFF34495e))),
           const SizedBox(height: 12),
 
-          // ✅ Refreshes live with StreamBuilder
-          StreamBuilder<DocumentSnapshot>(
-            stream: _db
-                .collection("users")
-                .doc(FirebaseAuth.instance.currentUser!.uid)
-                .collection("family")
-                .doc(data["id"])
-                .snapshots(),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const SizedBox(
-                    height: 80,
-                    child: Center(child: CircularProgressIndicator()));
-              }
-              if (!snap.hasData || !snap.data!.exists) {
-                return Text("No patient profile",
-                    style: GoogleFonts.poppins(color: Colors.black54));
-              }
-              final resident = snap.data!.data() as Map<String, dynamic>?;
-              final patientId = (resident?["patientId"] ?? "").toString();
-              if (patientId.isEmpty) {
-                return Text("No patient ID yet",
-                    style: GoogleFonts.poppins(color: Colors.black54));
-              }
-              return _visitHistory(patientId);
-            },
-          ),
+          if (patientId.isEmpty)
+            Text("No patient ID yet",
+                style: GoogleFonts.poppins(color: Colors.black54))
+          else
+            _visitHistory(patientId),
         ],
       ),
     );
