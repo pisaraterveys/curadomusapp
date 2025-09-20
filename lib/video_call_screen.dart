@@ -34,12 +34,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String? _callDocId;
   lk.VideoTrack? _remoteVideoTrack;
 
-  // Chart form controllers
-  final _reasonCtrl = TextEditingController();
-  final _backgroundCtrl = TextEditingController();
-  final _statusCtrl = TextEditingController();
-  final _planCtrl = TextEditingController();
-
   @override
   void initState() {
     super.initState();
@@ -144,31 +138,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     if (mounted) Navigator.of(context).maybePop();
   }
 
-  Future<void> _saveVisit() async {
-    final provider = _auth.currentUser;
-    if (provider == null || widget.patientId == null) return;
-
-    await _db.collection("visits").add({
-      "patientId": widget.patientId, // ✅ stable patient id
-      "providerId": provider.uid,
-      "providerName": widget.userName,
-      "reason": _reasonCtrl.text.trim(),
-      "background": _backgroundCtrl.text.trim(),
-      "status": _statusCtrl.text.trim(),
-      "plan": _planCtrl.text.trim(),
-      "createdAt": FieldValue.serverTimestamp(),
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("✅ Visit saved")),
-    );
-
-    _reasonCtrl.clear();
-    _backgroundCtrl.clear();
-    _statusCtrl.clear();
-    _planCtrl.clear();
-  }
-
   @override
   void dispose() {
     _endCall();
@@ -239,67 +208,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ),
           ],
         ),
-        body: Row(
-          children: [
-            // Video area
-            Expanded(
-              flex: 3,
-              child: Center(
-                child: _joining
-                    ? const CircularProgressIndicator()
-                    : Stack(
-                        children: [
-                          Positioned.fill(child: _remoteVideo()),
-                          _localVideo(),
-                        ],
-                      ),
-              ),
-            ),
-
-            // Chart sidebar
-            Container(
-              width: 320,
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                border: Border(left: BorderSide(color: Colors.black12)),
-                color: Colors.white,
-              ),
-              child: ListView(
-                children: [
-                  Text("🧑‍⚕️ Visit Chart",
-                      style: GoogleFonts.poppins(
-                          fontSize: 18, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _reasonCtrl,
-                    decoration: const InputDecoration(labelText: "Reason"),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxW),
+            child: _joining
+                ? const CircularProgressIndicator()
+                : Stack(
+                    children: [
+                      Positioned.fill(child: _remoteVideo()),
+                      _localVideo(),
+                    ],
                   ),
-                  TextField(
-                    controller: _backgroundCtrl,
-                    decoration: const InputDecoration(labelText: "Background"),
-                  ),
-                  TextField(
-                    controller: _statusCtrl,
-                    decoration: const InputDecoration(labelText: "Status"),
-                  ),
-                  TextField(
-                    controller: _planCtrl,
-                    decoration: const InputDecoration(labelText: "Plan"),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF89bcbe),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _saveVisit,
-                    icon: const Icon(Icons.save),
-                    label: const Text("Save Visit"),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

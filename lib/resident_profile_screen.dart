@@ -7,8 +7,9 @@ import 'video_call_screen.dart';
 
 class ResidentProfileScreen extends StatelessWidget {
   final Map<String, dynamic> data;
+  final _db = FirebaseFirestore.instance;
 
-  const ResidentProfileScreen({super.key, required this.data});
+  ResidentProfileScreen({Key? key, required this.data}) : super(key: key);
 
   /// Normalize Firestore arrays into List<String>
   List<String> _asStringList(dynamic value) {
@@ -76,7 +77,8 @@ class ResidentProfileScreen extends StatelessWidget {
               (e) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Text("• $e",
-                    style: GoogleFonts.poppins(color: const Color(0xFF46627f))),
+                    style:
+                        GoogleFonts.poppins(color: const Color(0xFF46627f))),
               ),
             ),
         ],
@@ -125,39 +127,73 @@ class ResidentProfileScreen extends StatelessWidget {
         return;
       }
 
-      // Fetch buyer data
-      final buyerSnap = await FirebaseFirestore.instance
-          .collection("users")
-          .doc(buyerUid)
-          .get();
+      final buyerSnap =
+          await _db.collection("users").doc(buyerUid).get();
       final buyerData = buyerSnap.data() ?? {};
 
-      // Reference resident doc under buyer
-      final residentDoc = FirebaseFirestore.instance
-          .collection("users")
-          .doc(buyerUid)
-          .collection("family")
-          .doc(data["id"]);
+      String patientId = "";
+      DocumentReference<Map<String, dynamic>>? profileRef;
 
-      final residentSnap = await residentDoc.get();
-      final residentData = residentSnap.data() ?? {};
+      if (data.containsKey("id")) {
+        // Resident inside family
+        profileRef = _db
+            .collection("users")
+            .doc(buyerUid)
+            .collection("family")
+            .doc(data["id"]);
 
-      // Ensure patientId exists for this resident
-      String patientId = (residentData["patientId"] ?? "").toString();
-      if (patientId.isEmpty) {
-        // create stable ID
-        patientId = FirebaseFirestore.instance.collection("patients").doc().id;
-        await residentDoc.update({"patientId": patientId});
+        final residentSnap = await profileRef.get();
+        final residentData = residentSnap.data() ?? {};
+        patientId = (residentData["patientId"] ?? "").toString();
+
+        if (!residentSnap.exists) {
+          patientId = _db.collection("patients").doc().id;
+          await profileRef.set({
+            "id": data["id"],
+            "name": data["name"] ?? "",
+            "dob": data["dob"] ?? "",
+            "gender": data["gender"] ?? "",
+            "patientId": patientId,
+            "createdAt": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } else if (patientId.isEmpty) {
+          patientId = _db.collection("patients").doc().id;
+          await profileRef.update({"patientId": patientId});
+        }
+      } else {
+        // Buyer themselves
+        profileRef = _db.collection("users").doc(buyerUid);
+
+        final buyerDataSnap = await profileRef.get();
+        final buyerProfile = buyerDataSnap.data() ?? {};
+        patientId = (buyerProfile["patientId"] ?? "").toString();
+
+        if (!buyerDataSnap.exists) {
+          patientId = _db.collection("patients").doc().id;
+          await profileRef.set({
+            "uid": buyerUid,
+            "firstName": buyerData["firstName"] ?? "",
+            "lastName": buyerData["lastName"] ?? "",
+            "dob": buyerData["dob"] ?? "",
+            "gender": buyerData["gender"] ?? "",
+            "patientId": patientId,
+            "createdAt": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } else if (patientId.isEmpty) {
+          patientId = _db.collection("patients").doc().id;
+          await profileRef.update({"patientId": patientId});
+        }
       }
 
       final roomId = "curadomus_${DateTime.now().millisecondsSinceEpoch}";
 
       final mergedData = {
         "room": roomId,
-        "startedByUid": buyerUid, // who placed the call
-        "patientId": patientId,   // stable ID for resident
-        "residentId": data["id"],
-        "residentName": data["name"] ?? "",
+        "startedByUid": buyerUid,
+        "patientId": patientId,
+        "residentId": data["id"] ?? buyerUid,
+        "residentName": data["name"] ??
+            "${buyerData["firstName"] ?? ""} ${buyerData["lastName"] ?? ""}",
         "firstName": buyerData["firstName"] ?? "",
         "lastName": buyerData["lastName"] ?? "",
         "dob": data["dob"] ?? buyerData["dob"] ?? "",
@@ -174,10 +210,9 @@ class ResidentProfileScreen extends StatelessWidget {
         "createdAt": FieldValue.serverTimestamp(),
       };
 
-      // Save call (professional joins from CallQueue)
-      await FirebaseFirestore.instance.collection("calls").add(mergedData);
+      final callRef =
+          await _db.collection("calls").add(mergedData);
 
-      // Navigate to the patient video screen
       if (context.mounted) {
         Navigator.push(
           context,
@@ -186,10 +221,8 @@ class ResidentProfileScreen extends StatelessWidget {
               room: roomId,
               userName:
                   "${buyerData["firstName"] ?? ""} ${buyerData["lastName"] ?? ""}",
-              // NOTE: Your current VideoCallScreen doesn't accept patientUid / callDocId.
-              // If you later add them back, you can pass:
-              // patientUid: patientId,
-              // callDocId: callRef.id,
+              patientId: patientId,
+              callDocId: callRef.id,
             ),
           ),
         );
@@ -217,7 +250,7 @@ class ResidentProfileScreen extends StatelessWidget {
       ),
       padding: const EdgeInsets.all(8),
       child: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
+        stream: _db
             .collection("visits")
             .where("patientId", isEqualTo: patientId)
             .orderBy("createdAt", descending: true)
@@ -438,27 +471,31 @@ class ResidentProfileScreen extends StatelessWidget {
                   color: const Color(0xFF34495e))),
           const SizedBox(height: 12),
 
-          // Fetch patientId dynamically from family doc and render the history
-          FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance
-                .collection("users")
-                .doc(FirebaseAuth.instance.currentUser!.uid)
-                .collection("family")
-                .doc(data["id"])
-                .get(),
+          // ✅ Handles both residents and buyer
+          StreamBuilder<DocumentSnapshot>(
+            stream: data.containsKey("id")
+                ? _db
+                    .collection("users")
+                    .doc(FirebaseAuth.instance.currentUser!.uid)
+                    .collection("family")
+                    .doc(data["id"])
+                    .snapshots()
+                : _db
+                    .collection("users")
+                    .doc(FirebaseAuth.instance.currentUser!.uid)
+                    .snapshots(),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SizedBox(
-                  height: 80,
-                  child: Center(child: CircularProgressIndicator()),
-                );
+                    height: 80,
+                    child: Center(child: CircularProgressIndicator()));
               }
               if (!snap.hasData || !snap.data!.exists) {
                 return Text("No patient profile",
                     style: GoogleFonts.poppins(color: Colors.black54));
               }
-              final resident = snap.data!.data() as Map<String, dynamic>?;
-              final patientId = (resident?["patientId"] ?? "").toString();
+              final profileData = snap.data!.data() as Map<String, dynamic>?;
+              final patientId = (profileData?["patientId"] ?? "").toString();
               if (patientId.isEmpty) {
                 return Text("No patient ID yet",
                     style: GoogleFonts.poppins(color: Colors.black54));
