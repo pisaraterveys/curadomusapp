@@ -9,14 +9,12 @@ import 'package:livekit_client/livekit_client.dart' as lk;
 class ProfessionalVideoCallScreen extends StatefulWidget {
   final String room; // e.g. "curadomus_<uid>"
   final String userName; // display name
-  final String? patientUid; // patient ID
   final String? callDocId; // Firestore call doc
 
   const ProfessionalVideoCallScreen({
     super.key,
     required this.room,
     required this.userName,
-    this.patientUid,
     this.callDocId,
   });
 
@@ -34,6 +32,7 @@ class _ProfessionalVideoCallScreenState
   bool _joining = true;
   bool _ended = false;
   String? _callDocId;
+  String? _patientId; // ✅ stable patientId from call doc
   lk.VideoTrack? _remoteVideoTrack;
 
   // Chart form controllers
@@ -80,6 +79,15 @@ class _ProfessionalVideoCallScreenState
   Future<void> _startCallFlow() async {
     try {
       _callDocId = widget.callDocId;
+
+      // ✅ Fetch patientId from the call doc
+      if (_callDocId != null) {
+        final callSnap = await _db.collection("calls").doc(_callDocId).get();
+        if (callSnap.exists) {
+          final callData = callSnap.data() ?? {};
+          _patientId = callData["patientId"]?.toString();
+        }
+      }
 
       final data = await _fetchLiveKitToken();
       final token = data['token'] as String;
@@ -135,10 +143,10 @@ class _ProfessionalVideoCallScreenState
 
   Future<void> _saveVisit() async {
     final provider = _auth.currentUser;
-    if (provider == null || widget.patientUid == null) return;
+    if (provider == null || _patientId == null) return;
 
     await _db.collection("visits").add({
-      "patientId": widget.patientUid,
+      "patientId": _patientId, // ✅ stable patientId from call doc
       "providerId": provider.uid,
       "providerName": widget.userName,
       "reason": _reasonCtrl.text.trim(),

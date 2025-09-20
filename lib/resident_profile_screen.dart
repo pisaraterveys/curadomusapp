@@ -9,7 +9,7 @@ class ResidentProfileScreen extends StatelessWidget {
   final Map<String, dynamic> data;
   final _db = FirebaseFirestore.instance;
 
-  ResidentProfileScreen({Key? key, required this.data}) : super(key: key);
+  ResidentProfileScreen({super.key, required this.data});
 
   /// Normalize Firestore arrays into List<String>
   List<String> _asStringList(dynamic value) {
@@ -77,8 +77,7 @@ class ResidentProfileScreen extends StatelessWidget {
               (e) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Text("• $e",
-                    style:
-                        GoogleFonts.poppins(color: const Color(0xFF46627f))),
+                    style: GoogleFonts.poppins(color: const Color(0xFF46627f))),
               ),
             ),
         ],
@@ -131,58 +130,25 @@ class ResidentProfileScreen extends StatelessWidget {
           await _db.collection("users").doc(buyerUid).get();
       final buyerData = buyerSnap.data() ?? {};
 
-      String patientId = "";
-      DocumentReference<Map<String, dynamic>>? profileRef;
+      final residentDoc = _db
+          .collection("users")
+          .doc(buyerUid)
+          .collection("family")
+          .doc(data["id"]);
 
-      if (data.containsKey("id")) {
-        // Resident inside family
-        profileRef = _db
-            .collection("users")
-            .doc(buyerUid)
-            .collection("family")
-            .doc(data["id"]);
+      final residentSnap = await residentDoc.get();
+      Map<String, dynamic> residentData = residentSnap.data() ?? {};
 
-        final residentSnap = await profileRef.get();
-        final residentData = residentSnap.data() ?? {};
-        patientId = (residentData["patientId"] ?? "").toString();
-
-        if (!residentSnap.exists) {
-          patientId = _db.collection("patients").doc().id;
-          await profileRef.set({
-            "id": data["id"],
-            "name": data["name"] ?? "",
-            "dob": data["dob"] ?? "",
-            "gender": data["gender"] ?? "",
-            "patientId": patientId,
-            "createdAt": FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } else if (patientId.isEmpty) {
-          patientId = _db.collection("patients").doc().id;
-          await profileRef.update({"patientId": patientId});
-        }
-      } else {
-        // Buyer themselves
-        profileRef = _db.collection("users").doc(buyerUid);
-
-        final buyerDataSnap = await profileRef.get();
-        final buyerProfile = buyerDataSnap.data() ?? {};
-        patientId = (buyerProfile["patientId"] ?? "").toString();
-
-        if (!buyerDataSnap.exists) {
-          patientId = _db.collection("patients").doc().id;
-          await profileRef.set({
-            "uid": buyerUid,
-            "firstName": buyerData["firstName"] ?? "",
-            "lastName": buyerData["lastName"] ?? "",
-            "dob": buyerData["dob"] ?? "",
-            "gender": buyerData["gender"] ?? "",
-            "patientId": patientId,
-            "createdAt": FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } else if (patientId.isEmpty) {
-          patientId = _db.collection("patients").doc().id;
-          await profileRef.update({"patientId": patientId});
-        }
+      // ✅ Generate or reuse stable patientId for THIS resident only
+      String patientId = (residentData["patientId"] ?? "").toString();
+      if (patientId.isEmpty) {
+        patientId = _db.collection("patients").doc().id;
+        await residentDoc.set({
+          ...data,
+          "id": data["id"],
+          "patientId": patientId,
+          "createdAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
       }
 
       final roomId = "curadomus_${DateTime.now().millisecondsSinceEpoch}";
@@ -190,22 +156,21 @@ class ResidentProfileScreen extends StatelessWidget {
       final mergedData = {
         "room": roomId,
         "startedByUid": buyerUid,
-        "patientId": patientId,
-        "residentId": data["id"] ?? buyerUid,
-        "residentName": data["name"] ??
-            "${buyerData["firstName"] ?? ""} ${buyerData["lastName"] ?? ""}",
+        "patientId": patientId, // ✅ stable resident-specific id
+        "residentId": data["id"],
+        "residentName": data["name"] ?? "",
         "firstName": buyerData["firstName"] ?? "",
         "lastName": buyerData["lastName"] ?? "",
-        "dob": data["dob"] ?? buyerData["dob"] ?? "",
-        "gender": data["gender"] ?? buyerData["gender"] ?? "",
+        "dob": data["dob"] ?? "",
+        "gender": data["gender"] ?? "",
         "city": buyerData["city"] ?? "",
         "street": buyerData["address"] ?? buyerData["street"] ?? "",
         "subscription": buyerData["subscription"] ?? "",
         "insuranceCompany": buyerData["insuranceCompany"] ?? "",
         "insuranceId": buyerData["insuranceId"] ?? "",
-        "diagnoses": data["diagnoses"] ?? buyerData["diagnoses"] ?? [],
-        "medications": data["medications"] ?? buyerData["medications"] ?? [],
-        "notes": data["notes"] ?? buyerData["notes"] ?? "",
+        "diagnoses": data["diagnoses"] ?? [],
+        "medications": data["medications"] ?? [],
+        "notes": data["notes"] ?? "",
         "status": "active",
         "createdAt": FieldValue.serverTimestamp(),
       };
@@ -471,19 +436,14 @@ class ResidentProfileScreen extends StatelessWidget {
                   color: const Color(0xFF34495e))),
           const SizedBox(height: 12),
 
-          // ✅ Handles both residents and buyer
+          // ✅ Refreshes live with StreamBuilder
           StreamBuilder<DocumentSnapshot>(
-            stream: data.containsKey("id")
-                ? _db
-                    .collection("users")
-                    .doc(FirebaseAuth.instance.currentUser!.uid)
-                    .collection("family")
-                    .doc(data["id"])
-                    .snapshots()
-                : _db
-                    .collection("users")
-                    .doc(FirebaseAuth.instance.currentUser!.uid)
-                    .snapshots(),
+            stream: _db
+                .collection("users")
+                .doc(FirebaseAuth.instance.currentUser!.uid)
+                .collection("family")
+                .doc(data["id"])
+                .snapshots(),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SizedBox(
@@ -494,8 +454,8 @@ class ResidentProfileScreen extends StatelessWidget {
                 return Text("No patient profile",
                     style: GoogleFonts.poppins(color: Colors.black54));
               }
-              final profileData = snap.data!.data() as Map<String, dynamic>?;
-              final patientId = (profileData?["patientId"] ?? "").toString();
+              final resident = snap.data!.data() as Map<String, dynamic>?;
+              final patientId = (resident?["patientId"] ?? "").toString();
               if (patientId.isEmpty) {
                 return Text("No patient ID yet",
                     style: GoogleFonts.poppins(color: Colors.black54));

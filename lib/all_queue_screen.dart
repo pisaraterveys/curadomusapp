@@ -141,8 +141,6 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
               final call = docs[index].data() as Map<String, dynamic>;
               final room = (call["room"] ?? "Unknown Room").toString();
               final startedByUid = (call['startedByUid'] ?? '').toString();
-              final residentId =
-                  (call['residentId'] ?? startedByUid).toString(); // ✅ always prefer residentId
               final status = (call["status"] ?? "active").toString();
               final createdAt = (call["createdAt"] as Timestamp?)?.toDate();
 
@@ -244,10 +242,7 @@ class _CallQueueScreenState extends State<CallQueueScreen> {
                                       room: room,
                                       userName:
                                           "Doctor", // TODO: replace with signed-in provider name
-                                      patientUid:
-                                          residentId, // ✅ always use residentId
-                                      callDocId:
-                                          docs[index].id, // Firestore call doc
+                                      callDocId: docs[index].id, // ✅ only pass callDocId
                                     ),
                                   ),
                                 );
